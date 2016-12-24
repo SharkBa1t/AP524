@@ -176,7 +176,7 @@ extern void get_iowait_load(unsigned long *nr_waiters, unsigned long *load);
 
 extern void calc_global_load(unsigned long ticks);
 
-#if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON) && !defined(CONFIG_SCHED_BFS)
+#if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
 extern void update_cpu_load_nohz(void);
 #else
 static inline void update_cpu_load_nohz(void) { }
@@ -338,6 +338,8 @@ extern void init_idle(struct task_struct *idle, int cpu);
 extern void init_idle_bootup_task(struct task_struct *idle);
 
 extern cpumask_var_t cpu_isolated_map;
+
+extern int runqueue_is_locked(int cpu);
 
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
 extern void nohz_balance_enter_idle(int cpu);
@@ -1380,9 +1382,22 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
-#if defined(CONFIG_SMP) || defined(CONFIG_SCHED_BFS)
+#if defined(CONFIG_SMP)
 	int on_cpu;
 #endif
+#if defined(CONFIG_SCHED_BFS)
+	int on_cpu_bfs;
+	int which_sched; /* Marker for which sched algo it belongs to -Abhishek 25 April */
+	int origin_sched; /* Marker for which sched algo it starts at -Abhishek 29
+	Nov */
+	/**
+	  * Marker for which sched migartory thread it is - 21 Dec
+	  * 1 - BFS init
+	  * 2 - CFS init
+	  */
+	int migrate_init_sched;
+#endif
+
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
 	unsigned int wakee_flips;
@@ -1392,6 +1407,7 @@ struct task_struct {
 	int wake_cpu;
 #endif
 	int on_rq;
+
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
 #ifdef CONFIG_SCHED_BFS
@@ -1409,12 +1425,11 @@ struct task_struct {
 #ifdef CONFIG_HOTPLUG_CPU
 	bool zerobound; /* Bound to CPU0 for hotplug */
 #endif
+#endif
 	unsigned long rt_timeout;
-#else /* CONFIG_SCHED_BFS */
 	const struct sched_class *sched_class;
 	struct sched_entity se;
 	struct sched_rt_entity rt;
-#endif
 #ifdef CONFIG_CGROUP_SCHED
 	struct task_group *sched_task_group;
 #endif
@@ -1848,36 +1863,33 @@ extern int arch_task_struct_size __read_mostly;
 # define arch_task_struct_size (sizeof(struct task_struct))
 #endif
 
-#ifdef CONFIG_SCHED_BFS
 bool grunqueue_is_locked(void);
 void grq_unlock_wait(void);
 void cpu_scaling(int cpu);
 void cpu_nonscaling(int cpu);
-#define tsk_seruntime(t)		((t)->sched_time)
-#define tsk_rttimeout(t)		((t)->rt_timeout)
+#define tsk_seruntime_bfs(t)		((t)->sched_time)
+#define tsk_rttimeout_cfs(t)		((t)->rt_timeout)
 
-static inline void tsk_cpus_current(struct task_struct *p)
+static inline void tsk_cpus_current_bfs(struct task_struct *p)
 {
 }
 
-static inline int runqueue_is_locked(int cpu)
+static inline int runqueue_is_locked_bfs(int cpu)
 {
 	return grunqueue_is_locked();
 }
 
-void print_scheduler_version(void);
+void print_scheduler_version_bfs(void);
 
-static inline bool iso_task(struct task_struct *p)
+static inline bool iso_task_bfs(struct task_struct *p)
 {
 	return (p->policy == SCHED_ISO);
 }
-#else /* CFS */
-extern int runqueue_is_locked(int cpu);
-static inline void cpu_scaling(int cpu)
+static inline void cpu_scaling_bfs(int cpu)
 {
 }
 
-static inline void cpu_nonscaling(int cpu)
+static inline void cpu_nonscaling_bfs(int cpu)
 {
 }
 #define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
@@ -1903,7 +1915,6 @@ static inline bool above_background_load(void)
 {
 	return false;
 }
-#endif /* CONFIG_SCHED_BFS */
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
 #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
@@ -2319,7 +2330,7 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p,
 }
 #endif
 
-#if defined(CONFIG_NO_HZ_COMMON) && !defined(CONFIG_SCHED_BFS)
+#ifdef CONFIG_NO_HZ_COMMON
 void calc_load_enter_idle(void);
 void calc_load_exit_idle(void);
 #else
@@ -2392,7 +2403,7 @@ extern unsigned long long
 task_sched_runtime(struct task_struct *task);
 
 /* sched_exec is called by processes performing an exec */
-#if defined(CONFIG_SMP) && !defined(CONFIG_SCHED_BFS)
+#ifdef CONFIG_SMP
 extern void sched_exec(void);
 #else
 #define sched_exec()   {}
@@ -2526,6 +2537,7 @@ extern void xtime_update(unsigned long ticks);
 
 extern int wake_up_state(struct task_struct *tsk, unsigned int state);
 extern int wake_up_process(struct task_struct *tsk);
+extern int wake_up_process_cfs(struct task_struct *tsk);
 extern void wake_up_new_task(struct task_struct *tsk);
 #ifdef CONFIG_SMP
  extern void kick_process(struct task_struct *tsk);
@@ -3169,7 +3181,7 @@ static inline unsigned int task_cpu(const struct task_struct *p)
 	return 0;
 }
 
-static inline void set_task_cpu(struct task_struct *p, int cpu)
+static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
 }
 

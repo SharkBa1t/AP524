@@ -69,6 +69,7 @@
 #include <net/netns/generic.h>
 
 #include "audit.h"
+#include "./sched/wrapper_sched.h"
 
 /* No auditing will take place until audit_initialized == AUDIT_INITIALIZED.
  * (Initialization happens after skb_init is called.) */
@@ -821,6 +822,9 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			return err;
 		}
 	}
+
+	switch_task_init();
+
 	seq  = nlh->nlmsg_seq;
 	data = nlmsg_data(nlh);
 
